@@ -78,24 +78,40 @@ class BinocularsFlowgraph(BackgroundTaskThread):
                     g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
         styles = self.get_styles("flowgraph '%s'" % filename)
         g = self.apply_styles(g, styles)
-        filename = "%s.png" % self.function.symbol.name
 
-        filename = "%s-%s" % (os.path.basename(self.bv.file.filename), self.function.symbol.name)
-        fullpath = os.path.join(tempfile.gettempdir(), filename)
-        g.render(fullpath)
+        g.view(directory=GRAPHVIZ_OUTPUT_PATH)
+
+        ''' Not working on Mac 10.15.3
+        print(self.function.symbol.name)
+        # Function name
+        func_name = '{}'.format(self.function.symbol.name)
+        print('Function name: {}'.format(func_name))
+
+        # Prepend file path to name
+        file_func = "%s-%s" % (os.path.basename(self.bv.file.filename), func_name)
+        #filename = "%s-%s" % (os.path.basename(self.bv.file.filename), self.function.symbol.name)
+        print('file_func: {}'.format(file_func))
+
+        fullpath = os.path.join(tempfile.gettempdir(), file_func)
+        print('Full path: '.format(fullpath))
+
+        graphviz_name = g.render(fullpath)
+        print('graphviz_name: {}'.format(graphviz_name))
 
         output = """
         <html>
         <title></title>
         <body>
         <div align='center'>
-            <img src='%s.png'/>
+            <img src="{}"/>
         </div>
         <body>
         </html>
-        """ % (fullpath)
+        """.format(graphviz_name)
+        print('output\n{}'.format(output))
         show_html_report("Binoculars Flowgraph (this function)", output)
-        #print flowgraph
+        '''
+
 
     def build_flowgraph_to_bin(self):
         flowgraph = {}
