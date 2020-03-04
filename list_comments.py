@@ -14,9 +14,10 @@ class BinocularsListComments(BackgroundTaskThread):
     def multi_line(self):
         content = ""
         for function in self.bv.functions:
-            for address, comment in function.comments.iteritems():
-                content += ("  0x%x  " %(int(address))).center(80, '=') + "\n"
-                content += comment + "\n\n"
+            if isinstance(function.comments, dict):
+                for address, comment in function.comments.items():
+                    content += ("  0x%x  " %(int(address))).center(80, '=') + "\n"
+                    content += comment + "\n\n"
 
         show_plain_text_report("Binoculars List Comments", content)
 
