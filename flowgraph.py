@@ -1,9 +1,13 @@
 ''' Requirements:
 pip install cxxfilt
+pip install tco
+
+reference: http://matthiaseisen.com/articles/graphviz/
 '''
 from binaryninja import *
 import graphviz
 import tempfile
+from tco import *
 
 try:
     import cxxfilt
@@ -14,9 +18,8 @@ except ImportError:
 import os
 os.environ['PATH'] += os.pathsep + '/usr/local/bin/'
 GRAPHVIZ_OUTPUT_PATH = '/tmp/'
-debug = True
+debug = False
 
-# reference: http://matthiaseisen.com/articles/graphviz/
 
 class BinocularsFlowgraph(BackgroundTaskThread):
 
@@ -87,48 +90,22 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         fullpath = os.path.join(tempfile.gettempdir(), filename)
 
         flowgraph = {}
-        self.build_flowgraph_to_function_recursive(self.function, flowgraph)
+
+        self.build_flowgraph_to_function(self.function, flowgraph)
+
         for node in flowgraph.keys():
             g.node(node)
             dst = node
+
             for src in flowgraph[node].keys():
                 for xref_addr in flowgraph[node][src]:
                     g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
+
         styles = self.get_styles("flowgraph '%s'" % filename)
         g = self.apply_styles(g, styles)
 
         g.view(directory=GRAPHVIZ_OUTPUT_PATH)
 
-        ''' Not working on Mac 10.15.3
-        print(self.function.symbol.name)
-        # Function name
-        func_name = '{}'.format(self.function.symbol.name)
-        print('Function name: {}'.format(func_name))
-
-        # Prepend file path to name
-        file_func = "%s-%s" % (os.path.basename(self.bv.file.filename), func_name)
-        #filename = "%s-%s" % (os.path.basename(self.bv.file.filename), self.function.symbol.name)
-        print('file_func: {}'.format(file_func))
-
-        fullpath = os.path.join(tempfile.gettempdir(), file_func)
-        print('Full path: '.format(fullpath))
-
-        graphviz_name = g.render(fullpath)
-        print('graphviz_name: {}'.format(graphviz_name))
-
-        output = """
-        <html>
-        <title></title>
-        <body>
-        <div align='center'>
-            <img src="{}"/>
-        </div>
-        <body>
-        </html>
-        """.format(graphviz_name)
-        print('output\n{}'.format(output))
-        show_html_report("Binoculars Flowgraph (this function)", output)
-        '''
 
     '''https://en.wikipedia.org/wiki/Name_mangling
     graphviz doesn't like colons in node names. This function tries to address
@@ -188,9 +165,9 @@ class BinocularsFlowgraph(BackgroundTaskThread):
 
     def build_flowgraph_to_bin(self):
         flowgraph = {}
+
         for function in self.bv.functions:
             pretty_name = self.__get_demangled(function.symbol.name)
-            #pretty_name = function.symbol.name
 
             flowgraph[pretty_name] = []
 
@@ -206,9 +183,76 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         return flowgraph
 
 
+    def get_xrefs_to_function(self, function, flowgraph):
+        '''Discover all xrefs to specified function. Not recursive.
+        Returns:
+            List of xref objects
+            Updates flowgraph dictionay with new xrefs
+                e.g. {'_lua_typename': {'_luaB_type': [4295090502],
+                      '_typeerror': [4295080892],
+                      '_tconcat': [4295128755, 4295128872],}}
+        '''
+        xref_list = []
+
+        pretty_name_function = self.__get_demangled(function.symbol.name)
+
+        if pretty_name_function not in flowgraph.keys():
+            # Add function name to graph if not already stored
+            flowgraph[pretty_name_function] = {}
+
+            for xref in self.bv.get_code_refs(function.symbol.address):
+
+                pretty_name_xref = self.__get_demangled(xref.function.symbol.name)
+
+                # Find all xrefs to function.
+                if pretty_name_xref not in flowgraph[pretty_name_function].keys():
+                    # Add xref function name to base function
+                    flowgraph[pretty_name_function][pretty_name_xref] = []
+
+                if xref.address not in flowgraph[pretty_name_function][pretty_name_xref]:
+                    # Add newly discovered xref address to xref function.
+                    # Function can have multiple xrefs to it from the same xref function block.
+                    flowgraph[pretty_name_function][pretty_name_xref].append(xref.address)
+                    xref_list.append(xref)
+
+            return xref_list if xref_list else None
+
+
+
+    def build_flowgraph_to_function(self, function, flowgraph, debug=False):
+        '''Builds a dictionary of xrefs to specified
+        function, and repeats process of xrefs to discovered xrefs.
+
+        Returns:
+            None. Updates parameter dictionary flowgraph.
+                Dictionary of all xrefs to function.
+                Dictionary can be used for drawing graphviz.
+        '''
+        # Use this as a counter to prevent infinite loop.
+        # TODO: Work towards removing hard_break.
+        hard_break = 1000
+
+        xrefs = self.get_xrefs_to_function(function,flowgraph)
+
+        while xrefs:
+            # Loops until xrefs list becomes empty or hard_break runs down.
+            if hard_break < 1:
+                break
+            hard_break = hard_break - 1
+
+            debug and print('xrefs len {}'.format(len(xrefs)))
+            new_xrefs = self.get_xrefs_to_function(xrefs.pop().function,flowgraph)
+
+            if new_xrefs:
+                xrefs = new_xrefs + xrefs
+
+
     def build_flowgraph_to_function_recursive(self, function, flowgraph):
-        if function.symbol.name not in flowgraph.keys():
-            pretty_name = self.__get_demangled(function.symbol.name)
+        # This function isn't reliable because of python's lmiitation with
+        # recursion. System resources will be exhausted.
+        pretty_name = self.__get_demangled(function.symbol.name)
+
+        if pretty_name not in flowgraph.keys():
             flowgraph[pretty_name] = {}
 
         for xref in self.bv.get_code_refs(function.symbol.address):
