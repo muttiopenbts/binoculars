@@ -7,7 +7,7 @@ reference: http://matthiaseisen.com/articles/graphviz/
 from binaryninja import *
 import graphviz
 import tempfile
-from tco import *
+
 
 try:
     import cxxfilt
@@ -30,6 +30,8 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         self.function = function
         # demangle type can be cppfilt, bn, None
         self.demangle = kwargs.get('demangle')
+        '''Caller can specify which method to invoke.'''
+        self.method = kwargs.get('method')
 
     def get_styles(self, label):
         styles = {
@@ -67,45 +69,58 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         return graph
 
     def view_flowgraph_to_bin(self):
-        g = graphviz.Digraph(format='png')
         flowgraph = self.build_flowgraph_to_bin()
+        self.draw_graph(flowgraph)
 
-        for node in flowgraph.keys():
-            debug and print('Node: {}'.format(node))
-
-            g.node(node)
-            dst = node
-            for src in flowgraph[dst]:
-                g.edge(src, dst)
-
-        styles = self.get_styles('flowgraph')
-        g = self.apply_styles(g, styles)
-        g.view(directory=GRAPHVIZ_OUTPUT_PATH)
 
     def view_flowgraph_to_function(self):
-        g = graphviz.Digraph(format='png')
-        filename = "{}-{}".format(os.path.basename(self.bv.file.filename),
-            self.__get_demangled(self.function.symbol.name))
-
-        fullpath = os.path.join(tempfile.gettempdir(), filename)
-
         flowgraph = {}
 
         self.build_flowgraph_to_function(self.function, flowgraph)
+        self.draw_graph(flowgraph)
+
+
+    def view_flowgraph_from_function(self):
+        flowgraph = {}
+
+        self.build_flowgraph_from_function(self.function, flowgraph)
+        self.draw_graph(flowgraph, forwards=True)
+
+
+    def draw_graph(self, flowgraph, forwards=False):
+        g = graphviz.Digraph(format='png')
+        filename = None
+
+        if hasattr(self.function, 'symbol'):
+            filename = "{}-{}".format(os.path.basename(self.bv.file.filename),
+                self.__get_demangled(self.function.symbol.name))
+
+            fullpath = os.path.join(tempfile.gettempdir(), filename)
+
 
         for node in flowgraph.keys():
             g.node(node)
             dst = node
+            debug and print('node: {}'.format(node))
+
+            if not isinstance(flowgraph[node],dict):
+                continue
 
             for src in flowgraph[node].keys():
+                debug and print('src: {}'.format(src))
                 for xref_addr in flowgraph[node][src]:
-                    g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
+                    debug and print('xref_addr: {}'.format(xref_addr))
+                    if forwards:
+                        g.edge(dst, src, label=hex(xref_addr).replace("L", ""))
+                    else:
+                        g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
 
-        styles = self.get_styles("flowgraph '%s'" % filename)
+        debug and print('g: {}'.format(g))
+
+        styles = self.get_styles('Flowgraph {}'.format(filename))
         g = self.apply_styles(g, styles)
 
         g.view(directory=GRAPHVIZ_OUTPUT_PATH)
-
 
     '''https://en.wikipedia.org/wiki/Name_mangling
     graphviz doesn't like colons in node names. This function tries to address
@@ -167,18 +182,23 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         flowgraph = {}
 
         for function in self.bv.functions:
-            pretty_name = self.__get_demangled(function.symbol.name)
+            pretty_name_function = self.__get_demangled(function.symbol.name)
 
-            flowgraph[pretty_name] = []
+            if pretty_name_function not in flowgraph.keys():
+                flowgraph[pretty_name_function] = {}
 
             for xref in self.bv.get_code_refs(function.symbol.address):
                 pretty_name_xref = self.__get_demangled(xref.function.symbol.name)
-                #pretty_name_xref = xref.function.symbol.name
 
-                if pretty_name_xref not in flowgraph[pretty_name]:
-                    debug and print('pretty_name: {}, before: {}'.format(pretty_name, function.symbol.name))
-                    debug and print('pretty_name_xref: {}, before: {}'.format(pretty_name_xref, xref.function.symbol.name))
-                    flowgraph[pretty_name].append(pretty_name_xref)
+                # Find all xrefs to function.
+                if pretty_name_xref not in flowgraph[pretty_name_function].keys():
+                    # Add xref function name to base function
+                    flowgraph[pretty_name_function][pretty_name_xref] = []
+
+                if xref.address not in flowgraph[pretty_name_function][pretty_name_xref]:
+                    # Add newly discovered xref address to xref function.
+                    # Function can have multiple xrefs to it from the same xref function block.
+                    flowgraph[pretty_name_function][pretty_name_xref].append(xref.address)
 
         return flowgraph
 
@@ -247,6 +267,71 @@ class BinocularsFlowgraph(BackgroundTaskThread):
                 xrefs = new_xrefs + xrefs
 
 
+    def build_flowgraph_from_function(self, function, flowgraph, debug=False):
+        '''Iterate over every instuction address and check if address xrefs to
+        other function.
+
+            e.g. 0x1000000 call hi_func -> xref from current function to hi_func
+
+        Arguments:
+
+        Returns:
+            xref_list. List of xrefs from function to code block.
+            flowgraph. Updates by reference. Dictionary.
+                e.g. {'main':'printf':[10001,10004]}
+        '''
+        xref_list = []
+
+        pretty_name_function = self.__get_demangled(name=function.symbol.name)
+        debug and print(pretty_name_function)
+
+        if pretty_name_function not in flowgraph.keys():
+            # Add function name to graph if not already stored
+            flowgraph[pretty_name_function] = {}
+
+        # Extract all code blocks from function block.
+        basic_blocks = sorted(function.basic_blocks, key=lambda bb: bb.start)
+
+
+        for basic_block in basic_blocks:
+            for inst in basic_block.get_disassembly_text():
+                if str(inst.tokens[0]) == function.name: continue
+
+                xrefs = self.bv.get_code_refs_from(inst.address)
+                debug and print('xref {}'.format(xrefs))
+
+                #if xref:
+                for xref in xrefs:
+                    debug and print('xref\tfrom:{}\tto:{}'.format(hex(inst.address), hex(xref)))
+                    xref_address = xref
+
+                    # Attempt to convert address to symbol
+                    xref_symbols = self.bv.get_functions_containing(xref)
+                    debug and print('xref symbols {}'.format(xref_symbols))
+                    if not xref_symbols:
+                        continue
+
+                    xref_symb = xref_symbols[0].symbol
+
+                    pretty_name_xref = self.__get_demangled(name=xref_symb.name)
+                    debug and print('xref symbol {}'.format(xref_symb))
+                    debug and print('xref symbol {}'.format(pretty_name_xref))
+
+
+                    if pretty_name_xref not in flowgraph[pretty_name_function].keys():
+                        # Add xref function name to base function
+                        flowgraph[pretty_name_function][pretty_name_xref] = []
+
+                    if inst.address not in flowgraph[pretty_name_function][pretty_name_xref]:
+                        # Add newly discovered xref address to xref function.
+                        # Function can have multiple xrefs to it from the same xref function block.
+                        flowgraph[pretty_name_function][pretty_name_xref].append(inst.address)
+                        xref_list.append(xref)
+
+
+        return xref_list if xref_list else None
+
+
     def build_flowgraph_to_function_recursive(self, function, flowgraph):
         # This function isn't reliable because of python's lmiitation with
         # recursion. System resources will be exhausted.
@@ -268,7 +353,9 @@ class BinocularsFlowgraph(BackgroundTaskThread):
 
 
     def run(self):
-        if self.function == None:
+        if self.function and self.method == 'from_function':
+            self.view_flowgraph_from_function()
+        elif self.function == None:
             self.view_flowgraph_to_bin()
         else:
             self.view_flowgraph_to_function()
