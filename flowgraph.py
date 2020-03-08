@@ -7,6 +7,7 @@ reference: http://matthiaseisen.com/articles/graphviz/
 from binaryninja import *
 import graphviz
 import tempfile
+import base64
 
 
 try:
@@ -87,16 +88,67 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         self.draw_graph(flowgraph, forwards=True)
 
 
-    def draw_graph(self, flowgraph, forwards=False):
-        g = graphviz.Digraph(format='png')
-        filename = None
+    def draw_graph(self, flowgraph, forwards=False, display='bn'):
+        '''Takes a flowgraph and displays the graphic.
 
-        if hasattr(self.function, 'symbol'):
-            filename = "{}-{}".format(os.path.basename(self.bv.file.filename),
-                self.__get_demangled(self.function.symbol.name))
+        Arguments
+            flowgraph:
+                dictionary.             e.g. {'main':{'printf':[1001, 1020]} ...}
+            forwards:
+                direction of arrows.    boolean
+            display:
+                Where to display graphic. string.
+                                        'bn' shows in binja gui.
+                                        None Default os image viewer.
 
-            fullpath = os.path.join(tempfile.gettempdir(), filename)
+        Returns
+        None
+        '''
+        g, filename = self.__draw_graph(flowgraph, forwards=forwards)
+        pngdata = base64.b64encode(open(filename,'rb').read())
 
+        output = """
+        <html>
+        <title>Flowgraph</title>
+        <body>
+        <h1>Flowgraph</h1>
+        <div align='center'>
+            <img src='data:image/png;base64,%s' alt='flowgraph'>
+        </div>
+        </body>
+        </html>
+        """ % (pngdata.decode("ascii"))
+
+        debug and print(output)
+
+        if display == 'bn':
+            self.bv.show_html_report("Binoculars Flowgraph", output)
+        else:
+            g.view()
+
+
+    def __draw_graph(self, flowgraph, filename=None, forwards=False):
+        '''
+        Returns:
+            Graphviz graph object.
+
+            filename.
+        '''
+        if filename == None:
+            # Caller hasn't specified a filename, so generate one
+            if hasattr(self.function, 'symbol'):
+                # Are we displaying a function level graph, from gui?
+                func_symbol = self.__get_demangled(self.function.symbol.name)
+                filename = os.path.basename(self.bv.file.filename)
+                filename = "{}-{}".format(filename, func_symbol)
+            else:
+                # Append function symbol to filename
+                filename = os.path.basename(self.bv.file.filename)
+
+
+        g = graphviz.Digraph(format='png',
+            directory=GRAPHVIZ_OUTPUT_PATH,
+            filename=filename)
 
         for node in flowgraph.keys():
             g.node(node)
@@ -108,8 +160,10 @@ class BinocularsFlowgraph(BackgroundTaskThread):
 
             for src in flowgraph[node].keys():
                 debug and print('src: {}'.format(src))
+
                 for xref_addr in flowgraph[node][src]:
                     debug and print('xref_addr: {}'.format(xref_addr))
+
                     if forwards:
                         g.edge(dst, src, label=hex(xref_addr).replace("L", ""))
                     else:
@@ -120,7 +174,10 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         styles = self.get_styles('Flowgraph {}'.format(filename))
         g = self.apply_styles(g, styles)
 
-        g.view(directory=GRAPHVIZ_OUTPUT_PATH)
+        if g.render():
+            # Graphviz automatically appends file type extension
+            return g, os.path.join(GRAPHVIZ_OUTPUT_PATH, filename + '.png')
+
 
     '''https://en.wikipedia.org/wiki/Name_mangling
     graphviz doesn't like colons in node names. This function tries to address
