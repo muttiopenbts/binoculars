@@ -70,48 +70,79 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         return graph
 
     def view_flowgraph_to_bin(self):
+        display_choice = get_choice_input("Select graph view type", "choices", ["Binja", "OS", "Text"])
+
         flowgraph = self.build_flowgraph_to_bin()
-        self.draw_graph(flowgraph)
+
+        if display_choice == 0:
+            self.draw_graph(flowgraph, display='bn')
+        elif display_choice == 1:
+            self.draw_graph(flowgraph, display='os')
+        elif display_choice == 2:
+            self.draw_graph(flowgraph, display='text')
 
 
     def view_flowgraph_to_function(self):
-        flowgraph = {}
+        display_choice = get_choice_input("Select graph view type", "choices", ["Binja", "OS", "Text"])
 
+        flowgraph = {}
         self.build_flowgraph_to_function(self.function, flowgraph)
-        self.draw_graph(flowgraph)
+
+        if display_choice == 0:
+            self.draw_graph(flowgraph, function=self.function, display='bn')
+        elif display_choice == 1:
+            self.draw_graph(flowgraph, function=self.function, display='os')
+        elif display_choice == 2:
+            self.draw_graph(flowgraph, function=self.function, display='text')
 
 
     def view_flowgraph_from_function(self):
+        display_choice = get_choice_input("Select graph view type", "choices", ["Binja", "OS", "Text"])
+
         flowgraph = {}
-
         self.build_flowgraph_from_function(self.function, flowgraph)
-        self.draw_graph(flowgraph, forwards=True)
+
+        if display_choice == 0:
+            self.draw_graph(flowgraph, function=self.function,
+                display='bn', forwards=True)
+
+        elif display_choice == 1:
+            self.draw_graph(flowgraph, function=self.function,
+                display='os', forwards=True)
+
+        elif display_choice == 2:
+            self.draw_graph(flowgraph, function=self.function,
+                display='text', forwards=True)
 
 
-    def draw_graph(self, flowgraph, forwards=False, display='bn'):
+    def draw_graph(self, flowgraph, function=None, forwards=False, display='bn'):
         '''Takes a flowgraph and displays the graphic.
 
         Arguments
             flowgraph:
-                dictionary.             e.g. {'main':{'printf':[1001, 1020]} ...}
+                Dictionary.             e.g. {'main':{'printf':[1001, 1020]} ...}
             forwards:
-                direction of arrows.    boolean
+                Direction of arrows.    boolean
             display:
                 Where to display graphic. string.
                                         'bn' shows in binja gui.
                                         None Default os image viewer.
+            function:
+                Binja function object.
 
         Returns
         None
         '''
-        g, filename = self.__draw_graph(flowgraph, forwards=forwards)
+        g, filename = self.__draw_graph(flowgraph, function=function, forwards=forwards)
         pngdata = base64.b64encode(open(filename,'rb').read())
 
         output = """
         <html>
         <title>Flowgraph</title>
         <body>
-        <h1>Flowgraph</h1>
+        <div align='center'>
+            <h1>Flowgraph</h1>
+        </div>
         <div align='center'>
             <img src='data:image/png;base64,%s' alt='flowgraph'>
         </div>
@@ -122,31 +153,38 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         debug and print(output)
 
         if display == 'bn':
+            show_message_box('Graphflow display', 'File location: {}'.format(filename))
             self.bv.show_html_report("Binoculars Flowgraph", output)
-        else:
+        elif display == 'os':
+            show_message_box('Graphflow display', 'File location: {}'.format(filename))
             g.view()
+        elif display == 'text':
+            self.bv.show_plain_text_report("Binoculars Flowgraph", str(g))
+        else:
+            show_message_box('Graphflow display', 'Output type not selected')
 
 
-    def __draw_graph(self, flowgraph, filename=None, forwards=False):
+    def __draw_graph(self, flowgraph, function=None, filename=None, forwards=False):
         '''
         Returns:
             Graphviz graph object.
 
             filename.
         '''
+        file_type = 'jpeg' # 'png'
+
         if filename == None:
             # Caller hasn't specified a filename, so generate one
-            if hasattr(self.function, 'symbol'):
+            if function and hasattr(function, 'symbol'):
                 # Are we displaying a function level graph, from gui?
-                func_symbol = self.__get_demangled(self.function.symbol.name)
+                func_symbol = self.__get_demangled(function.symbol.name)
                 filename = os.path.basename(self.bv.file.filename)
                 filename = "{}-{}".format(filename, func_symbol)
             else:
                 # Append function symbol to filename
                 filename = os.path.basename(self.bv.file.filename)
 
-
-        g = graphviz.Digraph(format='png',
+        g = graphviz.Digraph(format=file_type,
             directory=GRAPHVIZ_OUTPUT_PATH,
             filename=filename)
 
@@ -176,7 +214,7 @@ class BinocularsFlowgraph(BackgroundTaskThread):
 
         if g.render():
             # Graphviz automatically appends file type extension
-            return g, os.path.join(GRAPHVIZ_OUTPUT_PATH, filename + '.png')
+            return g, os.path.join(GRAPHVIZ_OUTPUT_PATH, filename + '.' + file_type)
 
 
     '''https://en.wikipedia.org/wiki/Name_mangling

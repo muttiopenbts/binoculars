@@ -63,25 +63,25 @@ PluginCommand.register_for_function(
 )
 
 PluginCommand.register_for_function(
-    "[BINoculars]\\Flowgraph\\All\\raw",
+    "[BINoculars]\\Flowgraph\\Binary\\Raw",
     "Best integrity",
     __flowgraph
 )
 
 PluginCommand.register_for_function(
-    "[BINoculars]\\Flowgraph\\Function\\raw",
+    "[BINoculars]\\Flowgraph\\Function to\\Raw",
     "Best integrity",
     __flowgraph_to_function
 )
 
 PluginCommand.register_for_function(
-    "[BINoculars]\\Flowgraph\\All\\bn",
+    "[BINoculars]\\Flowgraph\\Binary\\Bn",
     "",
     __flowgraph_bn
 )
 
 PluginCommand.register_for_function(
-    "[BINoculars]\\Flowgraph\\Function\\bn",
+    "[BINoculars]\\Flowgraph\\Function to\\Bn",
     "",
     __flowgraph_to_function_bn
 )
@@ -93,7 +93,7 @@ PluginCommand.register_for_function(
 )
 
 PluginCommand.register_for_function(
-    "[BINoculars]\\Flowgraph\\Function from\\bn",
+    "[BINoculars]\\Flowgraph\\Function from\\Bn",
     "",
     __flowgraph_from_function_bn
 )
@@ -103,19 +103,19 @@ try:
     import cxxfilt
 
     PluginCommand.register_for_function(
-        "[BINoculars]\\Flowgraph\\All\\c++filt",
+        "[BINoculars]\\Flowgraph\\Binary\\C++filt",
         "",
         __flowgraph_cppfilt
     )
 
     PluginCommand.register_for_function(
-        "[BINoculars]\\Flowgraph\\Function\\c++filt",
+        "[BINoculars]\\Flowgraph\\Function to\\C++filt",
         "",
         __flowgraph_to_function_cppfilt
     )
 
     PluginCommand.register_for_function(
-        "[BINoculars]\\Flowgraph\\Function from\\c++filt",
+        "[BINoculars]\\Flowgraph\\Function from\\C++filt",
         "",
         __flowgraph_from_function_cppfilt
     )
