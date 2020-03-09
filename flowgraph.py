@@ -8,6 +8,7 @@ from binaryninja import *
 import graphviz
 import tempfile
 import base64
+import subprocess
 
 
 try:
@@ -172,6 +173,10 @@ class BinocularsFlowgraph(BackgroundTaskThread):
             filename.
         '''
         file_type = 'jpeg' # 'png'
+        '''Iterating over every xref can clutter a graph.
+         Better to display one arrow and label with count.
+        '''
+        xref_style = 'count'
 
         if filename == None:
             # Caller hasn't specified a filename, so generate one
@@ -186,10 +191,12 @@ class BinocularsFlowgraph(BackgroundTaskThread):
 
         g = graphviz.Digraph(format=file_type,
             directory=GRAPHVIZ_OUTPUT_PATH,
-            filename=filename)
+            filename=filename,
+            graph_attr={'nodesep': '2.0'},
+            )
 
         for node in flowgraph.keys():
-            g.node(node)
+            g.node(node, color='blue')
             dst = node
             debug and print('node: {}'.format(node))
 
@@ -199,13 +206,21 @@ class BinocularsFlowgraph(BackgroundTaskThread):
             for src in flowgraph[node].keys():
                 debug and print('src: {}'.format(src))
 
-                for xref_addr in flowgraph[node][src]:
-                    debug and print('xref_addr: {}'.format(xref_addr))
+                count_label = len(flowgraph[node][src]) # Used to display count of xrefs between nodes
 
+                if xref_style == 'count':
                     if forwards:
-                        g.edge(dst, src, label=hex(xref_addr).replace("L", ""))
+                        g.edge(dst, src, label=str(count_label))
                     else:
-                        g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
+                        g.edge(src, dst, label=str(count_label))
+                else:
+                    for xref_addr in flowgraph[node][src]:
+                        debug and print('xref_addr: {}'.format(xref_addr))
+
+                        if forwards:
+                            g.edge(dst, src, label=hex(xref_addr).replace("L", ""))
+                        else:
+                            g.edge(src, dst, label=hex(xref_addr).replace("L", ""))
 
         debug and print('g: {}'.format(g))
 
@@ -213,8 +228,39 @@ class BinocularsFlowgraph(BackgroundTaskThread):
         g = self.apply_styles(g, styles)
 
         if g.render():
+            gv_filename_path = os.path.join(GRAPHVIZ_OUTPUT_PATH, filename)
+            # Improve aspect ratio of graph.
+            self.__fix_aspect_ratio(gv_filename_path, file_type)
             # Graphviz automatically appends file type extension
-            return g, os.path.join(GRAPHVIZ_OUTPUT_PATH, filename + '.' + file_type)
+            return g, gv_filename_path + '.' + file_type
+
+
+    def __fix_aspect_ratio(self, filename, file_type):
+        '''Hack to unflatten aspect ratio of graphviz graph images.
+        '''
+        unflatten = subprocess.Popen(['unflatten', '-f', '-l4', '-c6', filename],
+                                stdout=subprocess.PIPE,
+                                )
+
+        dot = subprocess.Popen(['dot'],
+                                stdin=unflatten.stdout,
+                                stdout=subprocess.PIPE,
+                                )
+
+        gvpack = subprocess.Popen(['gvpack', '-array_t6'],
+                                stdin=dot.stdout,
+                                stdout=subprocess.PIPE,
+                                )
+
+        neato = subprocess.Popen(['neato', '-s', '-n2', '-T' + file_type, '-o' + filename + '.' + file_type],
+                                stdin=gvpack.stdout,
+                                stdout=subprocess.PIPE,
+                                )
+
+        end_of_pipe = neato.stdout
+
+        for line in end_of_pipe:
+            print('\t', line.strip())
 
 
     '''https://en.wikipedia.org/wiki/Name_mangling
